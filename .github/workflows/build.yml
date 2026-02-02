@@ -239,6 +239,11 @@ jobs:
             OVERLAY_ARGS+=(--overlay-triplets="$VCPKG_OVERLAY_TRIPLETS")
           fi
 
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            export CFLAGS="-fPIC"
+            export CXXFLAGS="-fPIC"
+          fi
+
           $VCPKG_ROOT/vcpkg install libogg --triplet ${{ matrix.triplet }} "${OVERLAY_ARGS[@]}"
 
       - name: Configure CMake
@@ -256,6 +261,7 @@ jobs:
             "-DBUILD_TESTING=OFF"
             "-DINSTALL_CMAKE_PACKAGE_MODULE=ON"
             "-DBUILD_FRAMEWORK=OFF"
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
           )
 
           if [ "${{ matrix.is_android }}" == "true" ]; then
