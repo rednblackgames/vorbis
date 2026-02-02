@@ -1,0 +1,404 @@
+name: Build LibVorbis
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- DESKTOP (Linux x64) ---
+          - name: Linux x86_64
+            os: ubuntu-latest
+            triplet: x64-linux
+            folder: linux_x86_64
+
+          # --- WINDOWS (MinGW x64) ---
+          - name: Windows MinGW x64
+            os: windows-latest
+            triplet: x64-mingw-static
+            msystem: MINGW64
+            msys_packages: mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake
+            cross_cc: x86_64-w64-mingw32-gcc
+            cross_cxx: x86_64-w64-mingw32-g++
+            extra_cmake_args: '-G "MinGW Makefiles"'
+            folder: windows_x86_64
+
+          # --- WINDOWS (MinGW x86) ---
+          - name: Windows MinGW x86
+            os: windows-latest
+            triplet: x86-mingw-static
+            msystem: MINGW32
+            msys_packages: mingw-w64-i686-toolchain mingw-w64-i686-cmake
+            cross_cc: i686-w64-mingw32-gcc
+            cross_cxx: i686-w64-mingw32-g++
+            extra_cmake_args: '-G "MinGW Makefiles"'
+            folder: windows_x86
+
+          # --- ANDROID ---
+          - name: Android ARM64 (v8a)
+            os: ubuntu-latest
+            triplet: arm64-android
+            is_android: true
+            extra_cmake_args: "-DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24"
+            folder: android_abi_arm64_v8a
+
+          - name: Android ARM32 (v7a)
+            os: ubuntu-latest
+            triplet: arm-android
+            is_android: true
+            patch_android_arm: true
+            extra_cmake_args: "-DANDROID_ABI=armeabi-v7a -DANDROID_PLATFORM=android-24"
+            folder: android_abi_armeabi_v7a
+
+          - name: Android x86_64
+            os: ubuntu-latest
+            triplet: x64-android
+            is_android: true
+            extra_cmake_args: "-DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-24"
+            folder: android_abi_x86_64
+
+          - name: Android x86
+            os: ubuntu-latest
+            triplet: x86-android
+            is_android: true
+            extra_cmake_args: "-DANDROID_ABI=x86 -DANDROID_PLATFORM=android-24"
+            folder: android_abi_x86
+
+          # --- iOS ---
+          - name: iOS ARM64 (Device)
+            os: macos-latest
+            triplet: arm64-ios
+            vcpkg_osx_deployment_target: "15.0"
+            extra_cmake_args: "-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"
+            folder: ios_iphoneos_arm64
+
+          - name: iOS Simulator (x64)
+            os: macos-latest
+            triplet: x64-ios
+            vcpkg_osx_deployment_target: "15.0"
+            extra_cmake_args: "-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"
+            folder: ios_iphonesimulator_x86_64
+
+          - name: iOS Simulator (ARM64)
+            os: macos-latest
+            triplet: arm64-ios-simulator
+            vcpkg_osx_deployment_target: "15.0"
+            extra_cmake_args: "-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"
+            folder: ios_iphonesimulator_arm64
+
+          # --- macOS ---
+          - name: macOS ARM64 (Apple Silicon)
+            os: macos-latest
+            triplet: arm64-osx
+            vcpkg_osx_deployment_target: "11.0"
+            extra_cmake_args: "-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+            folder: macosx_arm64
+
+          - name: macOS x64 (Intel)
+            os: macos-latest
+            triplet: x64-osx
+            vcpkg_osx_deployment_target: "10.13"
+            extra_cmake_args: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13"
+            folder: macosx_x86_64
+
+          # --- CROSS-COMPILE LINUX ---
+          - name: Linux ARM64 (aarch64)
+            os: ubuntu-latest
+            triplet: arm64-linux
+            setup_cmd: |
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            cross_cc: aarch64-linux-gnu-gcc
+            cross_cxx: aarch64-linux-gnu-g++
+            folder: linux_arm64
+
+          - name: Linux ARM (armhf)
+            os: ubuntu-latest
+            triplet: arm-linux
+            setup_cmd: |
+              sudo apt-get update
+              sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+            cross_cc: arm-linux-gnueabihf-gcc
+            cross_cxx: arm-linux-gnueabihf-g++
+            folder: linux_arm
+
+          - name: Linux RISC-V 64
+            os: ubuntu-latest
+            triplet: riscv64-linux
+            setup_cmd: |
+              sudo apt-get update
+              sudo apt-get install -y gcc-riscv64-linux-gnu g++-riscv64-linux-gnu
+            cross_cc: riscv64-linux-gnu-gcc
+            cross_cxx: riscv64-linux-gnu-g++
+            folder: linux_riscv64
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # --- MSYS2 SETUP (Only runs on Windows) ---
+      - name: Setup MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        id: msys
+        with:
+          msystem: ${{ matrix.msystem }}
+          install: ${{ matrix.msys_packages }}
+          update: true
+          path-type: inherit
+
+      - name: Configure MinGW Paths
+        if: runner.os == 'Windows'
+        run: |
+          MSYS_ROOT="${{ steps.msys.outputs.msys2-location }}"
+          if [ "${{ matrix.msystem }}" == "MINGW64" ]; then
+            echo "MINGW_BIN=$MSYS_ROOT/mingw64/bin" >> $GITHUB_ENV
+          else
+            echo "MINGW_BIN=$MSYS_ROOT/mingw32/bin" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Android NDK
+        if: matrix.is_android
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+
+      - name: Export NDK Env
+        if: matrix.is_android
+        run: echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+      - name: Install System Dependencies
+        if: matrix.setup_cmd
+        run: ${{ matrix.setup_cmd }}
+
+      - name: Setup Vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $VCPKG_ROOT
+          cd $VCPKG_ROOT
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./bootstrap-vcpkg.bat
+          else
+            ./bootstrap-vcpkg.sh
+          fi
+
+      - name: Create overlay triplet (Apple deployment target)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+
+          OVERLAY_DIR="$GITHUB_WORKSPACE/overlay-triplets"
+          mkdir -p "$OVERLAY_DIR"
+
+          if [ -f "$VCPKG_ROOT/triplets/${{ matrix.triplet }}.cmake" ]; then
+            SRC="$VCPKG_ROOT/triplets/${{ matrix.triplet }}.cmake"
+          else
+            SRC="$VCPKG_ROOT/triplets/community/${{ matrix.triplet }}.cmake"
+          fi
+
+          cp "$SRC" "$OVERLAY_DIR/${{ matrix.triplet }}.cmake"
+          echo "set(VCPKG_OSX_DEPLOYMENT_TARGET \"${{ matrix.vcpkg_osx_deployment_target }}\")" >> \
+            "$OVERLAY_DIR/${{ matrix.triplet }}.cmake"
+
+          echo "VCPKG_OVERLAY_TRIPLETS=$OVERLAY_DIR" >> $GITHUB_ENV
+
+      - name: Patch Triplet for Android ARM32
+        if: matrix.patch_android_arm
+        run: |
+          TRIPLET_FILE="$VCPKG_ROOT/triplets/community/arm-android.cmake"
+          echo 'set(VCPKG_CMAKE_CONFIGURE_OPTIONS "-DANDROID_ARM_NEON=ON")' >> "$TRIPLET_FILE"
+
+      - name: Install Dependencies
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+             export PATH="$MINGW_BIN:$PATH"
+          fi
+
+          if [ "${{ runner.os }}" != "Windows" ]; then
+             $VCPKG_ROOT/vcpkg install vcpkg-cmake --triplet=x64-linux --host-triplet=x64-linux || true
+          fi
+
+          if [ ! -z "${{ matrix.cross_cc }}" ]; then
+            export CC=${{ matrix.cross_cc }}
+            export CXX=${{ matrix.cross_cxx }}
+          fi
+
+          OVERLAY_ARGS=()
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            OVERLAY_ARGS+=(--overlay-triplets="$VCPKG_OVERLAY_TRIPLETS")
+          fi
+
+          $VCPKG_ROOT/vcpkg install libogg --triplet ${{ matrix.triplet }} "${OVERLAY_ARGS[@]}"
+
+      - name: Configure CMake
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+             echo "Forcing MinGW Bin into PATH: $MINGW_BIN"
+             export PATH="$MINGW_BIN:$PATH"
+          fi
+
+          ARGS=(
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+            "-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}"
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-DBUILD_SHARED_LIBS=OFF"
+            "-DBUILD_TESTING=OFF"
+            "-DINSTALL_CMAKE_PACKAGE_MODULE=ON"
+            "-DBUILD_FRAMEWORK=OFF"
+          )
+
+          if [ "${{ matrix.is_android }}" == "true" ]; then
+             ANDROID_CHAINLOAD="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+             ARGS+=("-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ANDROID_CHAINLOAD")
+          fi
+
+          if [ ! -z "${{ matrix.cross_cc }}" ]; then
+            ARGS+=("-DCMAKE_C_COMPILER=${{ matrix.cross_cc }}")
+            ARGS+=("-DCMAKE_CXX_COMPILER=${{ matrix.cross_cxx }}")
+          fi
+
+          ARGS+=(${{ matrix.extra_cmake_args }})
+          cmake -B build -S . "${ARGS[@]}"
+
+      - name: Build
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+             export PATH="$MINGW_BIN:$PATH"
+          fi
+          cmake --build build --config Release
+
+      - name: Debug and Repack
+        run: |
+          set -x
+          set -e
+
+          if [ "$RUNNER_OS" == "Windows" ]; then
+             export PATH="$MINGW_BIN:$PATH"
+          fi
+
+          TOOL_AR="ar"
+          TOOL_RANLIB="ranlib"
+
+          if [ "${{ matrix.is_android }}" == "true" ]; then
+             TOOL_AR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+             TOOL_RANLIB="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
+          fi
+
+          VCPKG_LIB_DIR="$VCPKG_ROOT/installed/${{ matrix.triplet }}/lib"
+          BUILD_DIR="$(pwd)/build"
+
+          LIBOGG=$(find "$VCPKG_LIB_DIR" -name "*ogg.a" -o -name "*ogg.lib" | head -n 1)
+
+          LIBVORBIS=$(find "$BUILD_DIR" -name "*vorbis.a" -o -name "*vorbis.lib" | grep -v "vorbisenc" | grep -v "vorbisfile" | head -n 1)
+          LIBVORBISENC=$(find "$BUILD_DIR" -name "*vorbisenc.a" -o -name "*vorbisenc.lib" | head -n 1)
+          LIBVORBISFILE=$(find "$BUILD_DIR" -name "*vorbisfile.a" -o -name "*vorbisfile.lib" | head -n 1)
+
+          if [ -z "$LIBOGG" ] || [ -z "$LIBVORBIS" ] || [ -z "$LIBVORBISENC" ] || [ -z "$LIBVORBISFILE" ]; then
+             echo "ERROR: Missing libraries!"
+             echo "LIBOGG=$LIBOGG"
+             echo "LIBVORBIS=$LIBVORBIS"
+             echo "LIBVORBISENC=$LIBVORBISENC"
+             echo "LIBVORBISFILE=$LIBVORBISFILE"
+             exit 1
+          fi
+
+          # Normalize names in build/ so later steps are stable
+          cp "$LIBOGG" "$BUILD_DIR/libogg.a"
+          cp "$LIBVORBIS" "$BUILD_DIR/libvorbis.a"
+          cp "$LIBVORBISENC" "$BUILD_DIR/libvorbisenc.a"
+          cp "$LIBVORBISFILE" "$BUILD_DIR/libvorbisfile.a"
+
+          if [ "${{ runner.os }}" == "macOS" ]; then
+             libtool -static -o "$BUILD_DIR/libvorbis_combined.a" \
+               "$BUILD_DIR/libvorbisfile.a" "$BUILD_DIR/libvorbisenc.a" "$BUILD_DIR/libvorbis.a" "$BUILD_DIR/libogg.a"
+          else
+             WORK_DIR="$(pwd)/build/repack_work"
+             rm -rf "$WORK_DIR"
+             mkdir -p "$WORK_DIR/combined"
+
+             extract_lib() {
+                local LIB_PATH="$1"
+                local NAME="$2"
+                local DEST="$WORK_DIR/$NAME"
+
+                mkdir -p "$DEST"
+                cp "$LIB_PATH" "$DEST/lib.a"
+
+                pushd "$DEST" > /dev/null
+                "$TOOL_AR" x lib.a
+                rm lib.a
+                popd > /dev/null
+
+                find "$DEST" -type f -exec cp {} "$WORK_DIR/combined/" \;
+             }
+
+             extract_lib "$BUILD_DIR/libogg.a" "ogg"
+             extract_lib "$BUILD_DIR/libvorbis.a" "vorbis"
+             extract_lib "$BUILD_DIR/libvorbisenc.a" "vorbisenc"
+             extract_lib "$BUILD_DIR/libvorbisfile.a" "vorbisfile"
+
+             cd "$WORK_DIR/combined"
+             "$TOOL_AR" crs "$BUILD_DIR/libvorbis_combined.a" *
+             "$TOOL_RANLIB" "$BUILD_DIR/libvorbis_combined.a"
+          fi
+
+          ls -l "$BUILD_DIR"/*.a
+
+      - name: Organize Staging
+        run: |
+          TARGET="staging/${{ matrix.folder }}"
+          TARGET_LIB="$TARGET/lib"
+          TARGET_INC="$TARGET/include"
+          mkdir -p "$TARGET_LIB" "$TARGET_INC"
+
+          BUILD_DIR="$(pwd)/build"
+
+          cp "$BUILD_DIR/libogg.a" "$TARGET_LIB/"
+          cp "$BUILD_DIR/libvorbis.a" "$TARGET_LIB/"
+          cp "$BUILD_DIR/libvorbisenc.a" "$TARGET_LIB/"
+          cp "$BUILD_DIR/libvorbisfile.a" "$TARGET_LIB/"
+          cp "$BUILD_DIR/libvorbis_combined.a" "$TARGET_LIB/"
+
+          VCPKG_INC_DIR="$VCPKG_ROOT/installed/${{ matrix.triplet }}/include"
+          if [ -d "$VCPKG_INC_DIR" ]; then
+             cp -r "$VCPKG_INC_DIR/"* "$TARGET_INC/"
+          fi
+          if [ -d "include" ]; then
+             cp -r "include/"* "$TARGET_INC/"
+          fi
+
+      - name: Upload Partial Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: part-${{ matrix.folder }}
+          path: staging/
+          retention-days: 1
+
+  package:
+    name: Package All Platforms
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          merge-multiple: true
+          path: final_package
+
+      - name: Upload Final Unified Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvorbis-all-platforms
+          path: final_package/
