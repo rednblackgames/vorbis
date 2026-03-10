@@ -283,6 +283,11 @@ jobs:
              ARGS+=("-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$ANDROID_CHAINLOAD")
           fi
 
+          if [ "${{ matrix.is_wasm }}" == "true" ]; then
+             EMSCRIPTEN_CHAINLOAD="$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+             ARGS+=("-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$EMSCRIPTEN_CHAINLOAD")
+          fi
+
           if [ ! -z "${{ matrix.cross_cc }}" ]; then
             ARGS+=("-DCMAKE_C_COMPILER=${{ matrix.cross_cc }}")
             ARGS+=("-DCMAKE_CXX_COMPILER=${{ matrix.cross_cxx }}")
